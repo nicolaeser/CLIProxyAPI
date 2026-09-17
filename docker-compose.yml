@@ -1,17 +1,21 @@
+# CLIProxyAPI — production / release
+# Pulls the published image from GHCR.
+#
+#   cp config.example.yaml config.yaml   # then edit
+#   docker compose up -d
+#
+# Override tag:
+#   CLI_PROXY_IMAGE_TAG=v2026.09.17.abcdef0 docker compose up -d
+#
+# Local source build: docker compose -f docker-compose.dev.yml up --build
+
+name: cliproxyapi
+
 services:
   cli-proxy-api:
-    image: ${CLI_PROXY_IMAGE:-eceasy/cli-proxy-api:latest}
-    pull_policy: always
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VERSION: ${VERSION:-dev}
-        COMMIT: ${COMMIT:-none}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    container_name: cli-proxy-api
-    # env_file:
-    #   - .env
+    image: ${CLI_PROXY_IMAGE:-ghcr.io/nicolaeser/cliproxyapi}:${CLI_PROXY_IMAGE_TAG:-latest}
+    pull_policy: ${CLI_PROXY_PULL_POLICY:-always}
+    container_name: ${CLI_PROXY_CONTAINER_NAME:-cli-proxy-api}
     environment:
       DEPLOY: ${DEPLOY:-}
     ports:
