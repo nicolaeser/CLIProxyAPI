@@ -2,9 +2,12 @@ name: release
 
 on:
   push:
-    # run only against tags
+    # Upstream-style version tags. Exclude fork container-channel tags
+    # (vYYYY.MM.DD.<sha> / dev-YYYY.MM.DD.<sha>) created by main.yml.
     tags:
       - '*'
+      - '!v202*.*.*'
+      - '!dev-*'
 
 permissions:
   contents: write
@@ -647,7 +650,7 @@ jobs:
 
   publish-checksums:
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ !cancelled() && (needs.build-hosted.result == 'success' || needs.build-linux-glibc.result == 'success' || needs.build-linux-no-plugin.result == 'success' || needs.build-freebsd.result == 'success') }}
     needs:
       - build-hosted
       - build-linux-glibc
