@@ -15,6 +15,10 @@ env:
 
 jobs:
   prepare-release:
+    # Skip fork container-channel tags from main.yml / development.yml
+    # (vYYYY.MM.DD.<sha> and dev-YYYY.MM.DD.<sha>). Upstream-style semver
+    # tags such as v7.1.43 still run the binary release pipeline.
+    if: ${{ !(startsWith(github.ref_name, 'v202') || startsWith(github.ref_name, 'v203') || startsWith(github.ref_name, 'dev-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

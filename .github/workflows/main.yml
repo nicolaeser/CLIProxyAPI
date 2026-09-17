@@ -1,0 +1,222 @@
+# Main channel. Publishes GHCR :latest. Must not publish :dev or :development.
+#
+# CLIProxyAPI specifics vs a generic Go image:
+# - CGO_ENABLED=1 in the Dockerfile (sonic / plugins), so each arch is built on a
+#   native runner instead of QEMU cross-compilation.
+# - Model catalogs are refreshed into internal/registry/models before the image
+#   build (the Dockerfile COPY . . bakes them in; .dockerignore excludes .github).
+# - VERSION / COMMIT / BUILD_DATE are passed as build-args for main.* ldflags.
+name: main
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Build server
+        run: go build -buildvcs=false -o /tmp/CLIProxyAPI ./cmd/server
+
+  docker-pr:
+    if: github.event_name == 'pull_request'
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: false
+          platforms: linux/amd64
+          build-args: |
+            VERSION=pr
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=unknown
+
+  version:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      image: ${{ steps.meta.outputs.image }}
+      commit: ${{ steps.meta.outputs.commit }}
+      build_date: ${{ steps.meta.outputs.build_date }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: meta
+        name: Image coordinates
+        run: |
+          set -euo pipefail
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          version="v$(date -u +%Y.%m.%d).${short_sha}"
+          image="$(echo "${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "version=${version}"
+            echo "short_sha=${short_sha}"
+            echo "image=${image}"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
+  docker:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [test, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+            suffix: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: ${{ matrix.platform }}
+          provenance: true
+          sbom: true
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            COMMIT=${{ needs.version.outputs.commit }}
+            BUILD_DATE=${{ needs.version.outputs.build_date }}
+          tags: |
+            ${{ needs.version.outputs.image }}:latest-${{ matrix.suffix }}
+            ${{ needs.version.outputs.image }}:${{ needs.version.outputs.version }}-${{ matrix.suffix }}
+            ${{ needs.version.outputs.image }}:sha-${{ needs.version.outputs.short_sha }}-${{ matrix.suffix }}
+          labels: |
+            org.opencontainers.image.title=CLIProxyAPI
+            org.opencontainers.image.description=OpenAI/Gemini/Claude/Codex compatible CLI proxy
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+
+  manifest:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [docker, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create multi-arch tags including latest
+        id: publish
+        env:
+          IMAGE: ${{ needs.version.outputs.image }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHORT_SHA: ${{ needs.version.outputs.short_sha }}
+          FULL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:latest-amd64" \
+            "${IMAGE}:latest-arm64"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            "${IMAGE}:${VERSION}-amd64" \
+            "${IMAGE}:${VERSION}-arm64"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:sha-${SHORT_SHA}" \
+            "${IMAGE}:sha-${SHORT_SHA}-amd64" \
+            "${IMAGE}:sha-${SHORT_SHA}-arm64"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:sha-${FULL_SHA}" \
+            "${IMAGE}:sha-${SHORT_SHA}-amd64" \
+            "${IMAGE}:sha-${SHORT_SHA}-arm64"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## GHCR"
+            echo ""
+            echo '```text'
+            echo "${IMAGE}:latest"
+            echo "${IMAGE}:${VERSION}"
+            echo "${IMAGE}:sha-${SHORT_SHA}"
+            echo "${IMAGE}@${digest}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ needs.version.outputs.image }}
+        run: |
+          set -euo pipefail
+          body="$(printf '%s\n\n## Container\n\n```text\n%s:latest\n%s:%s\n%s@%s\n```\n' \
+            "Automated release from \`${GITHUB_SHA}\` on \`main\`." \
+            "${IMAGE}" \
+            "${IMAGE}" \
+            "${VERSION}" \
+            "${IMAGE}" \
+            "${DIGEST}")"
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} already exists"
+            exit 0
+          fi
+          gh release create "${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --title "${VERSION}" \
+            --notes "${body}" \
+            --generate-notes

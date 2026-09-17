@@ -34,17 +34,22 @@ switch ($choice) {
         Write-Host "  Build Date: $BUILD_DATE"
         Write-Host "----------------------------------------"
 
-        # Build and start the services with a local-only image tag
-        $env:CLI_PROXY_IMAGE = "cli-proxy-api:local"
-        
+        $env:VERSION = $VERSION
+        $env:COMMIT = $COMMIT
+        $env:BUILD_DATE = $BUILD_DATE
+        if (-not $env:CLI_PROXY_IMAGE) { $env:CLI_PROXY_IMAGE = "cli-proxy-api" }
+        if (-not $env:CLI_PROXY_IMAGE_TAG) { $env:CLI_PROXY_IMAGE_TAG = "local" }
+        if (-not $env:CLI_PROXY_PULL_POLICY) { $env:CLI_PROXY_PULL_POLICY = "build" }
+        if (-not $env:CLI_PROXY_CONTAINER_NAME) { $env:CLI_PROXY_CONTAINER_NAME = "cli-proxy-api-dev" }
+
         Write-Host "Building the Docker image..."
-        docker compose build --build-arg VERSION=$VERSION --build-arg COMMIT=$COMMIT --build-arg BUILD_DATE=$BUILD_DATE
+        docker compose -f docker-compose.dev.yml build --build-arg VERSION=$VERSION --build-arg COMMIT=$COMMIT --build-arg BUILD_DATE=$BUILD_DATE
 
         Write-Host "Starting the services..."
-        docker compose up -d --remove-orphans --pull never
+        docker compose -f docker-compose.dev.yml up -d --remove-orphans --pull never
 
         Write-Host "Build complete. Services are starting."
-        Write-Host "Run 'docker compose logs -f' to see the logs."
+        Write-Host "Run 'docker compose -f docker-compose.dev.yml logs -f' to see the logs."
     }
     default {
         Write-Host "Invalid choice. Please enter 1 or 2."

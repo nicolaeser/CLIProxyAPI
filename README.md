@@ -126,6 +126,16 @@ PackyCode provides special discounts for our software users: register using <a h
 
 CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
 
+This fork publishes a multi-arch image to GHCR on every push to `main` (`:latest`) and `development` (`:dev`).
+
+```bash
+cp config.example.yaml config.yaml
+docker compose up -d      # pulls ghcr.io/nicolaeser/cliproxyapi:latest
+docker compose logs -f
+```
+
+Override the tag with `CLI_PROXY_IMAGE_TAG` (see `.env.example`). Local source builds use `docker compose -f docker-compose.dev.yml up --build`.
+
 ## Management API
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)

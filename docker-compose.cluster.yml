@@ -1,15 +1,16 @@
+# CLIProxyAPI — cluster mode against CLIProxyAPIHome.
+# Pulls the published image from GHCR (same image as docker-compose.yml).
+#
+#   cp .env.cluster.example .env
+#   docker compose -f docker-compose.cluster.yml up -d
+
+name: cliproxyapi-cluster
+
 services:
   cli-proxy-api:
-    image: ${CLI_PROXY_IMAGE:-eceasy/cli-proxy-api:latest}
-    pull_policy: always
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VERSION: ${VERSION:-dev}
-        COMMIT: ${COMMIT:-none}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    container_name: cli-proxy-api-cluster
+    image: ${CLI_PROXY_IMAGE:-ghcr.io/nicolaeser/cliproxyapi}:${CLI_PROXY_IMAGE_TAG:-latest}
+    pull_policy: ${CLI_PROXY_PULL_POLICY:-always}
+    container_name: ${CLI_PROXY_CONTAINER_NAME:-cli-proxy-api-cluster}
     environment:
       HOME_JWT: ${HOME_JWT:-}
     ports:

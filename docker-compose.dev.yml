@@ -1,0 +1,18 @@
+# CLIProxyAPI — local development (build from source)
+#
+#   docker compose -f docker-compose.dev.yml up --build -d
+include:
+  - path: docker-compose.yml
+
+services:
+  cli-proxy-api:
+    image: ${CLI_PROXY_IMAGE:-cli-proxy-api}:${CLI_PROXY_IMAGE_TAG:-local}
+    pull_policy: ${CLI_PROXY_PULL_POLICY:-build}
+    container_name: ${CLI_PROXY_CONTAINER_NAME:-cli-proxy-api-dev}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
